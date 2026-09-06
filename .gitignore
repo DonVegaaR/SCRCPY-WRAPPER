@@ -1,0 +1,27 @@
+# Build output
+**/bin/
+**/obj/
+artifacts/
+
+# Local .NET SDK and package cache
+.dotnet/
+.nuget/
+**/.nuget/
+
+# Logs
+*.log
+debug-build.log
+launcher-debug-session.log
+
+# Design files
+ARCHITECTURE_ORGANIZER.svg
+design-previews/
+
+# Dev helper scripts and docs
+CHECKLIST.md
+*.cmd
+*.bat
+
+# OS files
+.DS_Store
+Thumbs.db

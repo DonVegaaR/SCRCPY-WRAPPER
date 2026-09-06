@@ -1,0 +1,28 @@
+<Window x:Class="ScrcpyLauncher.App.TextViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="560"
+        Height="360"
+        MinWidth="420"
+        MinHeight="260"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="CaptionText"
+                   FontSize="16"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,10" />
+
+        <TextBox x:Name="BodyTextBox"
+                 Grid.Row="1"
+                 IsReadOnly="True"
+                 FontFamily="Consolas"
+                 TextWrapping="Wrap"
+                 AcceptsReturn="True"
+                 VerticalScrollBarVisibility="Auto" />
+    </Grid>
+</Window>
