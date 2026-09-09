@@ -1,10 +1,9 @@
 using System.Text.Json;
 using ScrcpyLauncher.Core.Models;
-using ScrcpyLauncher.Core.Services;
 
 namespace ScrcpyLauncher.Infrastructure;
 
-public sealed class JsonLaunchProfileStore : ILaunchProfileStore
+public sealed class JsonLaunchProfileStore
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {

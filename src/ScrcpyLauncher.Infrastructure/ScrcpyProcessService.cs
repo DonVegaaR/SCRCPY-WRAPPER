@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using ScrcpyLauncher.Core.Models;
-using ScrcpyLauncher.Core.Services;
 
 namespace ScrcpyLauncher.Infrastructure;
 
-public sealed class ScrcpyProcessService : IScrcpyProcessService
+public sealed class ScrcpyProcessService
 {
     private readonly object gate = new();
     private Process? process;

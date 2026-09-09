@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -9,25 +8,22 @@ using ScrcpyLauncher.App.Infrastructure;
 using ScrcpyLauncher.App.Navigation;
 using ScrcpyLauncher.Core;
 using ScrcpyLauncher.Core.Models;
-using ScrcpyLauncher.Core.Services;
+using ScrcpyLauncher.Infrastructure;
 
 namespace ScrcpyLauncher.App.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    private readonly ILaunchProfileStore profileStore;
-    private readonly IScrcpyLocator locator;
-    private readonly IAdbService adbService;
-    private readonly IScrcpyProcessService processService;
+    private readonly JsonLaunchProfileStore profileStore;
+    private readonly ScrcpyBinaryLocator locator;
+    private readonly AdbService adbService;
+    private readonly ScrcpyProcessService processService;
     private readonly Dispatcher dispatcher;
     private readonly StringBuilder logBuilder = new();
-    private readonly ConcurrentQueue<string> pendingLogLines = new();
-    private readonly DispatcherTimer logFlushTimer;
-    private readonly DispatcherTimer uiHeartbeatTimer;
 
     private LaunchProfile? selectedPreset;
     private DeviceInfo? selectedDevice;
-    private object currentPage = DevicePage.Instance;
+    private object currentPage = new DevicePage();
     private string presetName = "Default";
     private string toolsDirectory = string.Empty;
     private string adbSerial = string.Empty;
@@ -53,13 +49,12 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool hasDetectedTools;
     private bool isRunning;
     private bool isBusy;
-    private long workerLogLineCount;
 
     public MainWindowViewModel(
-        ILaunchProfileStore profileStore,
-        IScrcpyLocator locator,
-        IAdbService adbService,
-        IScrcpyProcessService processService,
+        JsonLaunchProfileStore profileStore,
+        ScrcpyBinaryLocator locator,
+        AdbService adbService,
+        ScrcpyProcessService processService,
         Dispatcher dispatcher)
     {
         this.profileStore = profileStore;
@@ -79,18 +74,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         BrowseToolsCommand = new RelayCommand(BrowseTools);
         BrowseRecordCommand = new RelayCommand(BrowseRecord);
         NavigateCommand = new RelayCommand(Navigate);
-        logFlushTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
-        {
-            Interval = TimeSpan.FromMilliseconds(150),
-        };
-        logFlushTimer.Tick += OnLogFlushTimerTick;
-        logFlushTimer.Start();
-        uiHeartbeatTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
-        {
-            Interval = TimeSpan.FromSeconds(1),
-        };
-        uiHeartbeatTimer.Tick += OnUiHeartbeatTimerTick;
-        uiHeartbeatTimer.Start();
 
         RefreshPreview();
         RefreshToolsSummary();
@@ -118,7 +101,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             if (selectedPreset is not null)
             {
-                UpdateProfile(selectedPreset);
+                OverwriteProfile(selectedPreset, CaptureProfile());
             }
 
             selectedPreset = value;
@@ -150,7 +133,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             if (!string.IsNullOrWhiteSpace(SelectedDevice?.State))
             {
-                return HumanizeState(SelectedDevice.State);
+                return char.ToUpperInvariant(SelectedDevice.State[0]) + SelectedDevice.State[1..];
             }
 
             return "Waiting";
@@ -401,8 +384,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        logFlushTimer.Stop();
-        uiHeartbeatTimer.Stop();
         await processService.DisposeAsync();
     }
 
@@ -486,7 +467,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             if (selectedPreset is not null)
             {
-                UpdateProfile(selectedPreset);
+                OverwriteProfile(selectedPreset, CaptureProfile());
                 await PersistStateAsync();
             }
 
@@ -497,7 +478,7 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await processService.StartAsync(
                 paths,
                 arguments,
-                line => AppendLogFromWorker(line),
+                line => AppendLog(line),
                 exitCode => HandleExitFromWorker(exitCode),
                 CancellationToken.None);
 
@@ -638,11 +619,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         CurrentPage = (parameter as string) switch
         {
-            "Launch" => LaunchPage.Instance,
-            "Recording" => RecordingPage.Instance,
-            "Profile" => ProfilePage.Instance,
-            "Tools" => ToolsPage.Instance,
-            _ => DevicePage.Instance,
+            "Launch" => new LaunchPage(),
+            "Recording" => new RecordingPage(),
+            "Profile" => new ProfilePage(),
+            "Tools" => new ToolsPage(),
+            _ => new DevicePage(),
         };
     }
 
@@ -712,11 +693,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
             AdditionalArguments = AdditionalArguments.Trim(),
             PauseOnExitIfError = PauseOnExitIfError,
         };
-    }
-
-    private void UpdateProfile(LaunchProfile target)
-    {
-        OverwriteProfile(target, CaptureProfile());
     }
 
     private static void OverwriteProfile(LaunchProfile target, LaunchProfile source)
@@ -853,12 +829,6 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void AppendLog(string line)
     {
-        AppendLogToBuffer(line);
-        LogText = logBuilder.ToString();
-    }
-
-    private void AppendLogToBuffer(string line)
-    {
         if (logBuilder.Length > 64_000)
         {
             logBuilder.Clear();
@@ -869,16 +839,8 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
                   .Append(DateTime.Now.ToString("HH:mm:ss"))
                   .Append("] ")
                   .AppendLine(line);
-    }
 
-    private void AppendLogFromWorker(string line)
-    {
-        pendingLogLines.Enqueue(line);
-        var count = Interlocked.Increment(ref workerLogLineCount);
-        if (count <= 20 || count % 100 == 0)
-        {
-            StartupLogger.Write($"scrcpy output #{count}: {SummarizeForDebug(line)}");
-        }
+        LogText = logBuilder.ToString();
     }
 
     private void HandleExitFromWorker(int? exitCode)
@@ -886,46 +848,11 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         StartupLogger.Write($"HandleExitFromWorker invoked. ExitCode={(exitCode.HasValue ? exitCode.Value.ToString() : "null")}");
         _ = dispatcher.BeginInvoke(() =>
         {
-            FlushPendingLogs();
             IsRunning = false;
             var exitText = exitCode.HasValue ? exitCode.Value.ToString() : "unknown";
             StatusMessage = $"scrcpy exited with code {exitText}.";
             AppendLog($"scrcpy exited with code {exitText}.");
         });
-    }
-
-    private void OnLogFlushTimerTick(object? sender, EventArgs e)
-    {
-        FlushPendingLogs();
-    }
-
-    private void OnUiHeartbeatTimerTick(object? sender, EventArgs e)
-    {
-        if (!IsRunning && !IsBusy && pendingLogLines.IsEmpty)
-        {
-            return;
-        }
-
-        StartupLogger.Write(
-            $"UI heartbeat: running={IsRunning} busy={IsBusy} pendingLogs={pendingLogLines.Count} workerLogs={Interlocked.Read(ref workerLogLineCount)}");
-    }
-
-    private void FlushPendingLogs()
-    {
-        var appended = false;
-        var processed = 0;
-
-        while (processed < 200 && pendingLogLines.TryDequeue(out var line))
-        {
-            AppendLogToBuffer(line);
-            appended = true;
-            ++processed;
-        }
-
-        if (appended)
-        {
-            LogText = logBuilder.ToString();
-        }
     }
 
     private void NotifyCommandStates()
@@ -941,25 +868,5 @@ public sealed class MainWindowViewModel : ObservableObject, IAsyncDisposable
         BrowseToolsCommand.NotifyCanExecuteChanged();
         BrowseRecordCommand.NotifyCanExecuteChanged();
         NavigateCommand.NotifyCanExecuteChanged();
-    }
-
-    private static string HumanizeState(string state)
-    {
-        if (string.IsNullOrWhiteSpace(state))
-        {
-            return "Waiting";
-        }
-
-        return char.ToUpperInvariant(state[0]) + state[1..];
-    }
-
-    private static string SummarizeForDebug(string line)
-    {
-        if (line.Length <= 180)
-        {
-            return line;
-        }
-
-        return line[..180] + "...";
     }
 }

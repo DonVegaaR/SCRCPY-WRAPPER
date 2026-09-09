@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using ScrcpyLauncher.Core.Models;
-using ScrcpyLauncher.Core.Services;
 
 namespace ScrcpyLauncher.Infrastructure;
 
-public sealed class AdbService : IAdbService
+public sealed class AdbService
 {
     public async Task<IReadOnlyList<DeviceInfo>> ListDevicesAsync(string? adbExecutablePath, CancellationToken cancellationToken)
     {

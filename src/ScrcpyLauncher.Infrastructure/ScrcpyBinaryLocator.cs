@@ -1,9 +1,8 @@
 using ScrcpyLauncher.Core.Models;
-using ScrcpyLauncher.Core.Services;
 
 namespace ScrcpyLauncher.Infrastructure;
 
-public sealed class ScrcpyBinaryLocator : IScrcpyLocator
+public sealed class ScrcpyBinaryLocator
 {
     private const int SearchDepth = 5;
 
@@ -31,7 +30,7 @@ public sealed class ScrcpyBinaryLocator : IScrcpyLocator
         AddCandidate(Directory.GetCurrentDirectory(), seen, roots);
 
         var current = new DirectoryInfo(AppContext.BaseDirectory);
-        for (var i = 0; current is not null && i < 7; ++i)
+        for (var i = 0; current is not null && i < SearchDepth; ++i)
         {
             AddCandidate(current.FullName, seen, roots);
             current = current.Parent;
